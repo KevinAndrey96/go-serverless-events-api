@@ -13,13 +13,18 @@ import (
 )
 
 type MyObject struct {
-	Pk       string `json:"pk"`
-	Sk       string `json:"sk"`
-	Name     string `json:"name"`
-	Capacity string `json:"capacity"`
-	Date     string `json:"date"`
-	Hour     string `json:"hour"`
-	Status   string `json:"status"`
+	Pk       string  `json:"pk"`
+	Sk       string  `json:"sk"`
+	Name     string  `json:"name"`
+	Lastname *string `json:"lastname,omitempty"`
+	Gender   *string `json:"gender,omitempty"`
+	Email    *string `json:"email,omitempty"`
+	Phone    *string `json:"phone,omitempty"`
+	EventID  *string `json:"eventid,omitempty"`
+	Capacity *string `json:"capacity,omitempty"`
+	Date     string  `json:"date"`
+	Hour     *string `json:"hour,omitempty"`
+	Status   string  `json:"status"`
 }
 
 func CrearRegistro(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {

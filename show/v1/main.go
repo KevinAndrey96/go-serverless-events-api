@@ -23,6 +23,9 @@ type Event struct {
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+
+	paramValue := request.QueryStringParameters["param"]
+
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-1"),
 	})
@@ -40,7 +43,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 				ComparisonOperator: aws.String("EQ"),
 				AttributeValueList: []*dynamodb.AttributeValue{
 					{
-						S: aws.String("METADATA#EVENT"),
+						S: aws.String("METADATA#" + paramValue),
 					},
 				},
 			},

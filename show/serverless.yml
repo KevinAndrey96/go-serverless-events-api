@@ -30,3 +30,7 @@ functions:
       - http:
           path: /v1
           method: GET
+          request:
+            parameters:
+              querystrings:
+                param: true
