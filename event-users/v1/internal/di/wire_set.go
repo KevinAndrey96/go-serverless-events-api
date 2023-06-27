@@ -5,8 +5,8 @@
 package di
 
 import (
-	"LiteraTest/create/v1/internal"
-	"LiteraTest/create/v1/internal/uc"
+	"LiteraTest/show/v1/internal"
+	"LiteraTest/show/v1/internal/uc"
 
 	"github.com/google/wire"
 )

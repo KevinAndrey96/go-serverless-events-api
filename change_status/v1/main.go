@@ -11,8 +11,9 @@ import (
 )
 
 type Request struct {
-	Pk string `json:"pk"`
-	Sk string `json:"sk"`
+	Pk     string `json:"pk"`
+	Sk     string `json:"sk"`
+	Status string `json:"status"`
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -22,7 +23,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return events.APIGatewayProxyResponse{StatusCode: 400}, err
 	}
 
-	err = updateItemStatus(req.Pk, req.Sk, "cancelled")
+	err = updateItemStatus(req.Pk, req.Sk, req.Status)
 	if err != nil {
 		return events.APIGatewayProxyResponse{StatusCode: 500}, err
 	}

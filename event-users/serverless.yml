@@ -1,7 +1,7 @@
 # double-booked When maintaining a calendar of events, it is important to know if an event overlaps with another event.
 # Given a sequence of events, each having a start and end time, write a program that will return
 # the sequence of all pairs of overlapping events.
-service: cancel-events
+service: event-users
 
 frameworkVersion: 3.27.0
 
@@ -13,8 +13,8 @@ provider:
   iamRoleStatements:
     - Effect: Allow
       Action:
-        - dynamodb:UpdateItem
-      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/eventstable"
+        - dynamodb:Query
+      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/eventstable/index/eventid-index"
 
 
 package:
@@ -29,4 +29,8 @@ functions:
     events:
       - http:
           path: /v1
-          method: POST
+          method: GET
+          request:
+            parameters:
+              querystrings:
+                param: true

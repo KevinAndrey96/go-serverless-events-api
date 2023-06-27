@@ -20,6 +20,11 @@ type Event struct {
 	Date     string `json:"date"`
 	Hour     string `json:"hour"`
 	Status   string `json:"status"`
+	Email    string `json:"email"`
+	Eventid  string `json:"eventid"`
+	Gender   string `json:"gender"`
+	Lastname string `json:"lastname"`
+	Phone    string `json:"phone"`
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {

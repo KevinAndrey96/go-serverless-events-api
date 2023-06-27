@@ -5,7 +5,7 @@
 package di
 
 import (
-	"LiteraTest/create/v1/internal"
+	"LiteraTest/show/v1/internal"
 
 	"github.com/google/wire"
 )
