@@ -1,3 +1,4 @@
+// Package main have the logic necessary to deploy the main handler
 package main
 
 import (
