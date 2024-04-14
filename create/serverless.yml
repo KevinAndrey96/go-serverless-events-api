@@ -1,4 +1,4 @@
-service: create-event-k2
+service: create-event
 
 frameworkVersion: 3.27.0
 
@@ -11,7 +11,7 @@ provider:
     - Effect: Allow
       Action:
         - dynamodb:PutItem
-      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/eventstable"
+      Resource: "arn:aws:dynamodb:us-east-1:351091342598:table/events-testing-table"
 
 package:
   individually: true

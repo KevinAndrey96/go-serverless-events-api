@@ -53,7 +53,7 @@ func CrearRegistro(ctx context.Context, request events.APIGatewayProxyRequest) (
 
 	input := &dynamodb.PutItemInput{
 		Item:      av,
-		TableName: aws.String("eventstable"),
+		TableName: aws.String("events-testing-table"),
 	}
 
 	_, err = svc.PutItem(input)
