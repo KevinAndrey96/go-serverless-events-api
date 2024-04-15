@@ -1,4 +1,4 @@
-service: create-event
+service: create-event-testing
 
 frameworkVersion: 3.27.0
 
