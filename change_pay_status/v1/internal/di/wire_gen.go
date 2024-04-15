@@ -7,8 +7,8 @@
 package di
 
 import (
-	"LiteraTest/create/v1/internal"
-	"LiteraTest/create/v1/internal/uc"
+	"LiteraTest/cancel/v1/internal"
+	"LiteraTest/cancel/v1/internal/uc"
 )
 
 // Injectors from wire.go:

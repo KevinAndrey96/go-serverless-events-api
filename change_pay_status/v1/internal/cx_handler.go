@@ -2,7 +2,7 @@
 package internal
 
 import (
-	"LiteraTest/create/v1/internal/models"
+	"LiteraTest/cancel/v1/internal/models"
 	"encoding/json"
 	"net/http"
 	"strconv"

@@ -2,7 +2,7 @@
 package uc
 
 import (
-	"LiteraTest/create/v1/internal/models"
+	"LiteraTest/cancel/v1/internal/models"
 	"reflect"
 	"testing"
 )
