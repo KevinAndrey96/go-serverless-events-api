@@ -1,88 +1,66 @@
+// Package main implements the Show Events microservice handler
 package main
 
 import (
 	"context"
-	"encoding/json"
+	"strings"
 
+	"github.com/KevinAndrey96/go-serverless-events-api/pkg/config"
+	"github.com/KevinAndrey96/go-serverless-events-api/pkg/models"
+	"github.com/KevinAndrey96/go-serverless-events-api/pkg/response"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 )
 
-type Event struct {
-	Pk       string `json:"pk"`
-	Sk       string `json:"sk"`
-	Name     string `json:"name"`
-	Capacity string `json:"capacity"`
-	Date     string `json:"date"`
-	Hour     string `json:"hour"`
-	Status   string `json:"status"`
-	Email    string `json:"email"`
-	Eventid  string `json:"eventid"`
-	Gender   string `json:"gender"`
-	Lastname string `json:"lastname"`
-	Phone    string `json:"phone"`
-	Price    string `json:"price"`
-	Bank     string `json:"bank"`
-	Account  string `json:"account"`
-}
-
-func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-
+// Handler processes the API Gateway request to query events by secondary index
+func Handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	paramValue := request.QueryStringParameters["param"]
-
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String("us-east-1"),
-	})
-
-	if err != nil {
-		return events.APIGatewayProxyResponse{}, err
+	if strings.TrimSpace(paramValue) == "" {
+		return response.Error(400, "missing required query parameter: 'param' (e.g. 'EVENT')")
 	}
 
-	svc := dynamodb.New(sess)
+	skValue := paramValue
+	if !strings.HasPrefix(skValue, "METADATA#") {
+		skValue = "METADATA#" + skValue
+	}
+
+	db := config.GetDynamoDBClient()
+	tableName := config.GetTableName()
+
 	input := &dynamodb.QueryInput{
-		TableName: aws.String("events-testing-table"),
+		TableName: aws.String(tableName),
 		IndexName: aws.String("sk-index"),
 		KeyConditions: map[string]*dynamodb.Condition{
 			"sk": {
 				ComparisonOperator: aws.String("EQ"),
 				AttributeValueList: []*dynamodb.AttributeValue{
 					{
-						S: aws.String("METADATA#" + paramValue),
+						S: aws.String(skValue),
 					},
 				},
 			},
 		},
 	}
 
-	result, err := svc.Query(input)
-
+	result, err := db.QueryWithContext(ctx, input)
 	if err != nil {
-		return events.APIGatewayProxyResponse{}, err
+		return response.Error(500, "failed to query events table: "+err.Error())
 	}
 
-	var eventsList []Event
-	err = dynamodbattribute.UnmarshalListOfMaps(result.Items, &eventsList)
-
-	if err != nil {
-		return events.APIGatewayProxyResponse{}, err
+	eventsList := make([]models.Event, 0)
+	if len(result.Items) > 0 {
+		err = dynamodbattribute.UnmarshalListOfMaps(result.Items, &eventsList)
+		if err != nil {
+			return response.Error(500, "failed to unmarshal database results: "+err.Error())
+		}
 	}
 
-	responseBody, err := json.Marshal(eventsList)
-
-	if err != nil {
-		return events.APIGatewayProxyResponse{}, err
-	}
-
-	return events.APIGatewayProxyResponse{
-		StatusCode: 200,
-		Body:       string(responseBody),
-	}, nil
+	return response.JSON(200, eventsList)
 }
 
 func main() {
-	lambda.Start(handler)
+	lambda.Start(Handler)
 }

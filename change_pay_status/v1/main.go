@@ -1,76 +1,74 @@
+// Package main implements the Change Payment Status microservice handler
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"strings"
+
+	"github.com/KevinAndrey96/go-serverless-events-api/pkg/config"
+	"github.com/KevinAndrey96/go-serverless-events-api/pkg/models"
+	"github.com/KevinAndrey96/go-serverless-events-api/pkg/response"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
-type Request struct {
-	Pk     string `json:"pk"`
-	Sk     string `json:"sk"`
-	Status string `json:"status"`
-}
+// Handler processes the API Gateway request to update attendee payment status
+func Handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	if strings.TrimSpace(request.Body) == "" {
+		return response.Error(400, "request body cannot be empty")
+	}
 
-func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	var req Request
+	var req models.UpdatePaymentStatusRequest
 	err := json.Unmarshal([]byte(request.Body), &req)
 	if err != nil {
-		return events.APIGatewayProxyResponse{StatusCode: 400}, err
+		return response.Error(400, "invalid JSON payload: "+err.Error())
 	}
 
-	err = updateItemStatus(req.Pk, req.Sk, req.Status)
-	if err != nil {
-		return events.APIGatewayProxyResponse{StatusCode: 500}, err
+	effectiveStatus := req.GetEffectiveStatus()
+	if req.PK == "" || req.SK == "" || effectiveStatus == "" {
+		return response.Error(422, "missing required fields: pk, sk, and payment status are mandatory")
 	}
 
-	return events.APIGatewayProxyResponse{StatusCode: 200}, nil
-}
-
-func updateItemStatus(pk string, sk string, newStatus string) error {
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String("us-east-1")},
-	)
-
-	if err != nil {
-		return err
-	}
-
-	svc := dynamodb.New(sess)
+	db := config.GetDynamoDBClient()
+	tableName := config.GetTableName()
 
 	input := &dynamodb.UpdateItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]*dynamodb.AttributeValue{
+			"pk": {
+				S: aws.String(req.PK),
+			},
+			"sk": {
+				S: aws.String(req.SK),
+			},
+		},
+		UpdateExpression: aws.String("SET #S = :s"),
 		ExpressionAttributeNames: map[string]*string{
 			"#S": aws.String("paymentstatus"),
 		},
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":s": {
-				S: aws.String(newStatus),
+				S: aws.String(effectiveStatus),
 			},
 		},
-		Key: map[string]*dynamodb.AttributeValue{
-			"pk": {
-				S: aws.String(pk),
-			},
-			"sk": {
-				S: aws.String(sk),
-			},
-		},
-		TableName:        aws.String("events-testing-table"),
-		UpdateExpression: aws.String("SET #S = :s"),
 	}
 
-	_, err = svc.UpdateItem(input)
+	_, err = db.UpdateItemWithContext(ctx, input)
 	if err != nil {
-		return err
+		return response.Error(500, "failed to update payment status: "+err.Error())
 	}
 
-	return nil
+	return response.Success(map[string]interface{}{
+		"message":        "payment status updated successfully",
+		"pk":             req.PK,
+		"sk":             req.SK,
+		"payment_status": effectiveStatus,
+	})
 }
 
 func main() {
-	lambda.Start(handler)
+	lambda.Start(Handler)
 }

@@ -1,32 +1,29 @@
-service: reminder-events
+service: reminder-events-api
 
-frameworkVersion: 3.27.0
+frameworkVersion: "3"
 
 provider:
   name: aws
-  runtime: go1.x
+  runtime: provided.al2
   region: us-east-1
   memorySize: 128
+  environment:
+    EVENTS_TABLE_NAME: ${env:EVENTS_TABLE_NAME, 'events-testing-table'}
+    SMTP_HOST: ${env:SMTP_HOST, 'mail.events.instanceshape.com'}
+    SMTP_PORT: ${env:SMTP_PORT, '465'}
+    SMTP_USER: ${env:SMTP_USER, 'no-responder@events.instanceshape.com'}
+    SMTP_PASS: ${env:SMTP_PASS, ''}
+    FROM_EMAIL: ${env:FROM_EMAIL, 'no-responder@events.instanceshape.com'}
+    SMTP_INSECURE_SKIP_VERIFY: ${env:SMTP_INSECURE_SKIP_VERIFY, 'false'}
   iamRoleStatements:
     - Effect: Allow
       Action:
-        - logs:CreateLogGroup
-        - logs:CreateLogStream
-        - logs:PutLogEvents
-      Resource: arn:aws:logs:*:*:*
-    - Effect: Allow
-      Action:
-        - events:PutRule
-        - events:PutTargets
-      Resource: arn:aws:events:*:*:*
-    - Effect: Allow
-      Action:
         - dynamodb:Query
-      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/eventstable/index/sk-index"
+      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/events-testing-table/index/sk-index"
     - Effect: Allow
       Action:
         - dynamodb:GetItem
-      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/eventstable"
+      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/events-testing-table"
 
 package:
   individually: true
@@ -37,10 +34,9 @@ functions:
     package:
       patterns:
         - './bin/v1'
-    timeout: 900
+    timeout: 300
     events:
       - schedule:
           name: user-reminder-cron
-          description: 'Intensidad cada 6 horas UTC-5'
+          description: 'Runs every 6 hours to notify attendees of events occurring within 24h'
           rate: cron(0 */6 * * ? *)
-          

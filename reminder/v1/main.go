@@ -1,55 +1,80 @@
+// Package main implements the Scheduled Event Reminder microservice handler
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
+	"net/smtp"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/KevinAndrey96/go-serverless-events-api/pkg/config"
+	"github.com/KevinAndrey96/go-serverless-events-api/pkg/models"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"net/smtp"
-	"time"
 )
 
-// Definimos la estructura de datos de nuestros items
-type Item struct {
-	SK      string `json:"sk"`
-	EventID string `json:"eventid"`
-	Email   string `json:"email"`
-	Date    string `json:"date"`
+// SMTPConfig holds credentials and connection parameters for the outbound mail server
+type SMTPConfig struct {
+	Host               string
+	Port               string
+	User               string
+	Pass               string
+	FromEmail          string
+	InsecureSkipVerify bool
 }
 
-type Eventitem struct {
-	SK   string `json:"sk"`
-	Name string `json:"name"`
-	Date string `json:"date"`
-	Hour string `json:"hour"`
+// loadSMTPConfig loads SMTP parameters from environment variables
+func loadSMTPConfig() SMTPConfig {
+	host := os.Getenv("SMTP_HOST")
+	if host == "" {
+		host = "mail.events.instanceshape.com"
+	}
+
+	port := os.Getenv("SMTP_PORT")
+	if port == "" {
+		port = "465"
+	}
+
+	user := os.Getenv("SMTP_USER")
+	if user == "" {
+		user = "no-responder@events.instanceshape.com"
+	}
+
+	pass := os.Getenv("SMTP_PASS")
+
+	fromEmail := os.Getenv("FROM_EMAIL")
+	if fromEmail == "" {
+		fromEmail = user
+	}
+
+	insecure := os.Getenv("SMTP_INSECURE_SKIP_VERIFY") == "true"
+
+	return SMTPConfig{
+		Host:               host,
+		Port:               port,
+		User:               user,
+		Pass:               pass,
+		FromEmail:          fromEmail,
+		InsecureSkipVerify: insecure,
+	}
 }
 
-func main() {
-	lambda.Start(HandleRequest)
-}
+// Handler processes the scheduled reminder invocation
+func Handler(ctx context.Context) error {
+	log.Printf("[INFO] Starting event reminder worker execution")
+	smtpCfg := loadSMTPConfig()
 
-func HandleRequest() {
-	// Creamos una sesión con AWS para acceder a DynamoDB
-	sess, _ := session.NewSession(&aws.Config{
-		Region: aws.String("us-east-1")},
-	)
+	db := config.GetDynamoDBClient()
+	tableName := config.GetTableName()
 
-	svc := dynamodb.New(sess)
-
-	// Escanear la tabla para obtener todos los items
-	/*
-		params := &dynamodb.ScanInput{
-			TableName: aws.String("eventstable"),
-		}
-
-		result, _ := svc.Scan(params)
-	*/
-
-	input := &dynamodb.QueryInput{
-		TableName: aws.String("eventstable"),
+	queryInput := &dynamodb.QueryInput{
+		TableName: aws.String(tableName),
 		IndexName: aws.String("sk-index"),
 		KeyConditions: map[string]*dynamodb.Condition{
 			"sk": {
@@ -63,58 +88,75 @@ func HandleRequest() {
 		},
 	}
 
-	result, err := svc.Query(input)
-	//fmt.Printf("%v", result)
-
+	result, err := db.QueryWithContext(ctx, queryInput)
 	if err != nil {
-		fmt.Printf("%v", err)
+		log.Printf("[ERROR] Failed to query user attendees: %v", err)
+		return err
 	}
 
-	// Desenmarcar los resultados en nuestra estructura de datos
-	items := []Item{}
-	dynamodbattribute.UnmarshalListOfMaps(result.Items, &items)
-	colombiaLocation := time.FixedZone("COT", -5*60*60)
-	loc, _ := time.LoadLocation("America/Bogota")
+	var attendees []models.UserAttendee
+	err = dynamodbattribute.UnmarshalListOfMaps(result.Items, &attendees)
+	if err != nil {
+		log.Printf("[ERROR] Failed to unmarshal attendees list: %v", err)
+		return err
+	}
 
+	log.Printf("[INFO] Retrieved %d attendees to evaluate for upcoming reminders", len(attendees))
+
+	loc := time.FixedZone("COT", -5*60*60)
+	now := time.Now().In(loc)
 	layout := "2006-01-02 15:04:05"
-	currentTime := time.Now().In(colombiaLocation)
-	fmt.Printf("La fecha actual es: %v", currentTime)
 
-	// Recorrer cada item y verificar si cumple los criterios
-	for _, item := range items {
-		if item.SK == "METADATA#USER" {
-			eventItem := findEventItem(item.EventID)
-			datetime, err := time.ParseInLocation(layout, eventItem.Date+" "+eventItem.Hour+":00", loc)
+	sentCount := 0
+	for _, attendee := range attendees {
+		if attendee.Email == "" || attendee.EventID == "" {
+			continue
+		}
+
+		eventItem, err := fetchEventDetails(ctx, db, tableName, attendee.EventID)
+		if err != nil {
+			log.Printf("[WARN] Unable to fetch event %s for attendee %s: %v", attendee.EventID, attendee.Email, err)
+			continue
+		}
+
+		eventTimeString := fmt.Sprintf("%s %s:00", eventItem.Date, eventItem.Hour)
+		eventTime, err := time.ParseInLocation(layout, eventTimeString, loc)
+		if err != nil {
+			log.Printf("[WARN] Unable to parse event date/time '%s': %v", eventTimeString, err)
+			continue
+		}
+
+		diff := eventTime.Sub(now)
+		hoursRemaining := diff.Hours()
+
+		// Send reminder if event starts between 0 and 24 hours from now
+		if hoursRemaining > 0 && hoursRemaining <= 24 {
+			log.Printf("[INFO] Event '%s' starts in %.1f hours. Sending reminder to %s", eventItem.Name, hoursRemaining, attendee.Email)
+			err = sendReminderEmail(smtpCfg, attendee.Email, eventItem.Name, eventItem.Date, eventItem.Hour)
 			if err != nil {
-				fmt.Printf("EL error es: %v", err)
-				return
-			}
-			fmt.Printf("%v", datetime)
-
-			duration := currentTime.Sub(datetime)
-
-			fmt.Printf("FALTAN %v HORAS", duration.Hours()*-1)
-			if duration.Hours()*-1 <= 24 {
-				sendEmail(item.Email)
+				log.Printf("[ERROR] Failed sending email to %s: %v", attendee.Email, err)
+			} else {
+				sentCount++
 			}
 		}
 	}
 
-	fmt.Println("Todo esta ok")
+	log.Printf("[INFO] Reminder cycle finished. Sent %d notification emails", sentCount)
+	return nil
 }
 
-func findEventItem(eventID string) Eventitem {
-	sess, _ := session.NewSession(&aws.Config{
-		Region: aws.String("us-east-1")},
-	)
+// fetchEventDetails loads the parent event metadata from DynamoDB
+func fetchEventDetails(ctx context.Context, db *dynamodb.DynamoDB, tableName, eventID string) (*models.Event, error) {
+	pk := eventID
+	if !strings.HasPrefix(pk, "Event#") {
+		pk = "Event#" + pk
+	}
 
-	svc := dynamodb.New(sess)
-	// Realizamos una consulta de un solo elemento en DynamoDB
-	params := &dynamodb.GetItemInput{
-		TableName: aws.String("eventstable"),
+	input := &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
 		Key: map[string]*dynamodb.AttributeValue{
 			"pk": {
-				S: aws.String(eventID),
+				S: aws.String(pk),
 			},
 			"sk": {
 				S: aws.String("METADATA#EVENT"),
@@ -122,111 +164,84 @@ func findEventItem(eventID string) Eventitem {
 		},
 	}
 
-	result, err := svc.GetItem(params)
+	result, err := db.GetItemWithContext(ctx, input)
 	if err != nil {
-		fmt.Printf("El error de servicio es %v:", err)
-		panic("errorunmarshal")
+		return nil, err
+	}
+	if result.Item == nil {
+		return nil, fmt.Errorf("event item with pk=%s not found", pk)
 	}
 
-	// Desenmarcamos los resultados en nuestra estructura de datos
-	var eventItem Eventitem
-	err1 := dynamodbattribute.UnmarshalMap(result.Item, &eventItem)
-	if err1 != nil {
-		fmt.Printf("El error1 es %v:", err1)
-		panic("errorunmarshal")
+	var eventItem models.Event
+	err = dynamodbattribute.UnmarshalMap(result.Item, &eventItem)
+	if err != nil {
+		return nil, err
 	}
 
-	//fmt.Printf("Evento = %s", eventItem.Hour)
-
-	return eventItem
+	return &eventItem, nil
 }
 
-func sendEmail(email string) {
-	/*
-		//first try
-		fmt.Println("Entro a la funcion senEmail")
-		// Nos autenticamos en el servidor SMTP
-		auth := smtp.PlainAuth("", "no-responder@events.instanceshape.com", "Prx3PA18,Agm", "mail.events.instanceshape.com")
-
-		fmt.Printf("LA AUTORIZACION ES: %v", auth)
-
-		// Componemos y enviamos el correo electrónico
-		err := smtp.SendMail("mail.events.instanceshape.com:465", auth, "no-responder@events.instanceshape.com",
-			[]string{email}, []byte("Subject: Recordatorio de evento\n\nTienes un evento mañana, no lo olvides!"))
-
-		// Imprimimos un registro
-		if err != nil {
-			fmt.Printf("Unable to send email: %s", err)
-			return
-		}
-
-		fmt.Printf("Email sent to: %s", email)
-	*/
-	fmt.Println("Entro a la funcion senEmail")
-	// Nos autenticamos en el servidor SMTP
-	auth := smtp.PlainAuth("", "no-responder@events.instanceshape.com", "Prx3PA18,Agm", "mail.events.instanceshape.com")
-
-	fmt.Printf("LA AUTORIZACION ES: %v", auth)
-
-	// Configuramos TLS
-	tlsconfig := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         "mail.events.instanceshape.com",
+// sendReminderEmail handles authenticated TLS SMTP transmission
+func sendReminderEmail(cfg SMTPConfig, recipient, eventName, eventDate, eventHour string) error {
+	if cfg.Pass == "" {
+		log.Printf("[WARN] SMTP_PASS not configured in environment. Skipping email dispatch to %s (dry-run)", recipient)
+		return nil
 	}
 
-	// Conectamos al servidor SMTP
-	conn, err := tls.Dial("tcp", "mail.events.instanceshape.com:465", tlsconfig)
+	auth := smtp.PlainAuth("", cfg.User, cfg.Pass, cfg.Host)
+
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: cfg.InsecureSkipVerify,
+		ServerName:         cfg.Host,
+	}
+
+	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
+	conn, err := tls.Dial("tcp", addr, tlsConfig)
 	if err != nil {
-		fmt.Printf("Unable to connect to SMTP server: %s", err)
-		return
+		return fmt.Errorf("tls connection failed to %s: %w", addr, err)
 	}
+	defer conn.Close()
 
-	// Creamos un cliente SMTP
-	client, err := smtp.NewClient(conn, "mail.events.instanceshape.com")
+	client, err := smtp.NewClient(conn, cfg.Host)
 	if err != nil {
-		fmt.Printf("Unable to create SMTP client: %s", err)
-		return
+		return fmt.Errorf("smtp client creation failed: %w", err)
 	}
+	defer client.Quit()
 
-	// Autenticamos
 	if err := client.Auth(auth); err != nil {
-		fmt.Printf("Unable to authenticate: %s", err)
-		return
+		return fmt.Errorf("smtp auth failed: %w", err)
 	}
 
-	// Componemos y enviamos el correo electrónico
-	if err := client.Mail("no-responder@events.instanceshape.com"); err != nil {
-		fmt.Printf("Unable to set sender: %s", err)
-		return
+	if err := client.Mail(cfg.FromEmail); err != nil {
+		return fmt.Errorf("mail from failed: %w", err)
 	}
-	if err := client.Rcpt(email); err != nil {
-		fmt.Printf("Unable to set recipient: %s", err)
-		return
+
+	if err := client.Rcpt(recipient); err != nil {
+		return fmt.Errorf("rcpt to failed: %w", err)
 	}
+
 	w, err := client.Data()
 	if err != nil {
-		fmt.Printf("Unable to create data writer: %s", err)
-		return
+		return fmt.Errorf("data writer failed: %w", err)
 	}
-	_, err = w.Write([]byte("From: no-responder@events.instanceshape.com\r\nSubject: Recordatorio de evento\r\n\r\nTienes un evento mañana, no lo olvides!"))
 
-	//_, err = w.Write([]byte("Subject: Recordatorio de evento\r\n\r\nTienes un evento mañana, no lo olvides!"))
-	if err != nil {
-		fmt.Printf("Unable to write data: %s", err)
-		return
+	subject := fmt.Sprintf("Recordatorio: Tu evento '%s' es mañana", eventName)
+	body := fmt.Sprintf("Hola!\n\nTe recordamos que tu evento '%s' está programado para el día %s a las %s.\n\nPor favor ten a mano tu código QR para el ingreso.\n\nSaludos,\nEquipo de Eventos", eventName, eventDate, eventHour)
+
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s", cfg.FromEmail, recipient, subject, body)
+
+	if _, err = w.Write([]byte(msg)); err != nil {
+		return fmt.Errorf("writing body failed: %w", err)
 	}
+
 	if err := w.Close(); err != nil {
-		fmt.Printf("Unable to close data writer: %s", err)
-		return
+		return fmt.Errorf("closing writer failed: %w", err)
 	}
 
-	// Cerramos la conexión
-	if err := client.Quit(); err != nil {
-		fmt.Printf("Unable to quit SMTP client: %s", err)
-		return
-	}
-
-	fmt.Printf("Email sent to: %s", email)
+	log.Printf("[INFO] Reminder email successfully delivered to %s", recipient)
+	return nil
 }
 
-//cron(0/5 * * * ? *)
+func main() {
+	lambda.Start(Handler)
+}

@@ -1,17 +1,19 @@
-service: create-event-testing
+service: create-event-api
 
-frameworkVersion: 3.27.0
+frameworkVersion: "3"
 
 provider:
   name: aws
   runtime: provided.al2
   region: us-east-1
   memorySize: 128
+  environment:
+    EVENTS_TABLE_NAME: ${env:EVENTS_TABLE_NAME, 'events-testing-table'}
   iamRoleStatements:
     - Effect: Allow
       Action:
         - dynamodb:PutItem
-      Resource: "arn:aws:dynamodb:us-east-1:351091342598:table/events-testing-table"
+      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/events-testing-table"
 
 package:
   individually: true
@@ -26,3 +28,4 @@ functions:
       - http:
           path: /v1
           method: POST
+          cors: true
