@@ -6,7 +6,7 @@
 [![Serverless](https://img.shields.io/badge/Serverless-Framework-FD5750?style=flat&logo=serverless)](https://www.serverless.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-An enterprise-ready, event-driven serverless backend engineered in **Go (Golang)** and deployed on **AWS Lambda** via the **Serverless Framework**. The platform manages the end-to-end lifecycle of events and attendee ticketing—including event registration, attendee check-in tracking, payment confirmation, and automated cron-based reminder notifications via TLS SMTP.
+An enterprise-ready, event-driven serverless backend engineered in **Go (Golang)** and deployed on **AWS Lambda** via the **Serverless Framework**. The platform manages the end-to-end lifecycle of events and attendee ticketing, including event registration, attendee check-in tracking, payment confirmation, and automated cron-based reminder notifications via TLS SMTP.
 
 Data persistence is powered by **Amazon DynamoDB** leveraging an optimized **Single-Table Design** pattern with Global Secondary Indexes (GSIs).
 
@@ -59,7 +59,7 @@ The system consolidates both **Events** and **User Attendees / Tickets** into a 
 
 | Entity | Partition Key (`pk`) | Sort Key (`sk`) | GSI: `sk-index` (PK) | GSI: `eventid-index` (PK) | Attributes |
 |---|---|---|---|---|---|
-| **Event Metadata** | `Event#<UUID>` | `METADATA#EVENT` | `METADATA#EVENT` | — | `name`, `capacity`, `price`, `date`, `hour`, `status`, `bank`, `account` |
+| **Event Metadata** | `Event#<UUID>` | `METADATA#EVENT` | `METADATA#EVENT` | N/A | `name`, `capacity`, `price`, `date`, `hour`, `status`, `bank`, `account` |
 | **Attendee / Ticket** | `User#<UUID>` | `METADATA#USER` | `METADATA#USER` | `Event#<UUID>` | `name`, `lastname`, `email`, `phone`, `status`, `paymentstatus`, `scholarship` |
 
 ### Access Pattern Matrix
@@ -181,7 +181,7 @@ serverless deploy --stage dev
 | `SMTP_HOST` | `mail.events.instanceshape.com` | Mail server hostname for reminders |
 | `SMTP_PORT` | `465` | TLS SMTP port |
 | `SMTP_USER` | `no-responder@events.instanceshape.com` | Outbound sender email username |
-| `SMTP_PASS` | — | Outbound sender email password |
+| `SMTP_PASS` | N/A | Outbound sender email password |
 | `FROM_EMAIL` | `no-responder@events.instanceshape.com` | Display address on reminder emails |
 
 ---
